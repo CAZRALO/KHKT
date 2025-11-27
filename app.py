@@ -18,6 +18,7 @@ def get_map_data(filename):
     # Chỉ cho phép tải các file an toàn
     allowed_files = [
         'Wards_2008.geojson', 
+        'Wards_2025.geojson',
         'Districts_2008.geojson', 
         'Provinces_2025_34.geojson', 
         'Provinces_2008_63.geojson'
