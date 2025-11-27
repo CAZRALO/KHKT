@@ -52,24 +52,16 @@
         .layer-controls { display: flex; gap: 20px; margin-top: 5px; padding-top: 10px; border-top: 1px solid #eee; }
         .checkbox-wrapper { display: flex; align-items: center; cursor: pointer; }
         .checkbox-wrapper input { margin-right: 8px; }
+        
+        /* Disabled state style */
+        .checkbox-wrapper.disabled { opacity: 0.5; cursor: not-allowed; }
+        .checkbox-wrapper.disabled input { cursor: not-allowed; }
 
         .loading-overlay {
             position: absolute; top: 0; left: 0; right: 0; bottom: 0;
             background: rgba(255,255,255,0.7); z-index: 2000;
             display: none; justify-content: center; align-items: center;
             font-size: 1.5rem; color: #333;
-        }
-        
-        .upload-section {
-            border-top: 1px solid #eee; 
-            padding-top: 10px; 
-            margin-top: 5px;
-        }
-        .upload-label {
-            display:block; font-size:0.9rem; margin-bottom:5px; font-weight:bold; color: #27ae60;
-        }
-        .upload-hint {
-            font-size: 0.75rem; color: #666; margin-top: 3px;
         }
     </style>
 </head>
@@ -81,7 +73,7 @@
     <div class="info-box" id="infoBox">
         <h3><i class="fas fa-map-marker-alt"></i> Thông tin địa điểm</h3>
         <div id="infoContent">
-            <div class="info-empty">Chọn một điểm trên bản đồ để xem thông tin chi tiết (Xã, Huyện, Tỉnh).</div>
+            <div class="info-empty">Chọn một điểm trên bản đồ để xem thông tin chi tiết.</div>
         </div>
     </div>
 
@@ -106,23 +98,12 @@
         </div>
 
         <div class="layer-controls">
-            <label class="checkbox-wrapper">
+            <label class="checkbox-wrapper" id="lblDistrict">
                 <input type="checkbox" id="showDistricts"> Hiển thị Quận/Huyện
             </label>
-            <label class="checkbox-wrapper">
+            <label class="checkbox-wrapper" id="lblWard">
                 <input type="checkbox" id="showWards"> Hiển thị Phường/Xã
             </label>
-        </div>
-        
-        <!-- Nút upload file để chạy offline/preview -->
-        <div class="upload-section">
-             <label for="fileInput" class="upload-label">
-                <i class="fas fa-upload"></i> Nạp dữ liệu (Chế độ Preview)
-             </label>
-             <input type="file" id="fileInput" multiple accept=".geojson" style="font-size: 0.8rem; width: 100%;">
-             <div class="upload-hint">
-                Nếu không chạy Server Python, vui lòng chọn các file .geojson (Provinces_2008, Wards_2008, v.v) tại đây để hiển thị.
-             </div>
         </div>
     </div>
 
@@ -130,7 +111,6 @@
     
     <script>
         // --- CẤU HÌNH DỮ LIỆU ---
-        // Định nghĩa các file có sẵn và năm của chúng
         const DATA_SOURCES = {
             province: [
                 { year: 2008, file: 'Provinces_2008_63.geojson' },
@@ -138,9 +118,11 @@
             ],
             district: [
                 { year: 2008, file: 'Districts_2008.geojson' }
+                // Không có entry 2025 vì yêu cầu không hiển thị
             ],
             ward: [
-                { year: 2008, file: 'Wards_2008.geojson' }
+                { year: 2008, file: 'Wards_2008.geojson' },
+                { year: 2025, file: 'Wards_2025.geojson' } // Đã thêm file mới cho 2025
             ]
         };
 
@@ -155,9 +137,6 @@
             district: { layer: null, year: null },
             ward: { layer: null, year: null }
         };
-        
-        // Cache dữ liệu local
-        const localData = {};
 
         // DOM Elements
         const timeline = document.getElementById('timeline');
@@ -166,13 +145,12 @@
         const chkDistricts = document.getElementById('showDistricts');
         const chkWards = document.getElementById('showWards');
         const infoContent = document.getElementById('infoContent');
+        const lblDistrict = document.getElementById('lblDistrict');
 
-        // Hàm tìm file có năm gần nhất với năm được chọn
+        // Hàm tìm file có năm gần nhất
         function getNearestFile(type, selectedYear) {
             const sources = DATA_SOURCES[type];
             if (!sources || sources.length === 0) return null;
-
-            // Tìm source có |source.year - selectedYear| nhỏ nhất
             return sources.reduce((prev, curr) => {
                 return (Math.abs(curr.year - selectedYear) < Math.abs(prev.year - selectedYear) ? curr : prev);
             });
@@ -187,113 +165,71 @@
         }
 
         // Cập nhật thông tin lên Info Box
-        function updateInfoBox(props, type, dataYear) {
+        function updateInfoBox(props, type, dataYear, currentYear) {
             let province = props.Name || props.NAME_1 || "N/A";
             let district = props.NAME_2 || "N/A";
             let ward = props.NAME_3 || "N/A";
             
-            // Xử lý hiển thị dựa trên loại layer được click
             let html = '';
             
-            if (type === 'ward') {
-                html += `<div class="info-row"><span class="info-label">Xã:</span> <span class="info-value">${ward}</span></div>`;
-                html += `<div class="info-row"><span class="info-label">Huyện:</span> <span class="info-value">${district}</span></div>`;
-                html += `<div class="info-row"><span class="info-label">Tỉnh:</span> <span class="info-value">${province}</span></div>`;
-            } else if (type === 'district') {
-                html += `<div class="info-row"><span class="info-label">Huyện:</span> <span class="info-value">${district}</span></div>`;
-                html += `<div class="info-row"><span class="info-label">Tỉnh:</span> <span class="info-value">${province}</span></div>`;
+            // Logic hiển thị theo yêu cầu 2025
+            if (currentYear >= 2025) {
+                // Từ năm 2025: Chỉ hiện Tỉnh và Xã, ẩn Huyện
+                if (type === 'ward') {
+                    html += `<div class="info-row"><span class="info-label">Xã:</span> <span class="info-value">${ward}</span></div>`;
+                    html += `<div class="info-row"><span class="info-label">Tỉnh:</span> <span class="info-value">${province}</span></div>`;
+                } else if (type === 'province') {
+                    html += `<div class="info-row"><span class="info-label">Tỉnh:</span> <span class="info-value">${province}</span></div>`;
+                }
             } else {
-                html += `<div class="info-row"><span class="info-label">Tỉnh:</span> <span class="info-value">${province}</span></div>`;
+                // Trước 2025: Hiển thị đầy đủ
+                if (type === 'ward') {
+                    html += `<div class="info-row"><span class="info-label">Xã:</span> <span class="info-value">${ward}</span></div>`;
+                    html += `<div class="info-row"><span class="info-label">Huyện:</span> <span class="info-value">${district}</span></div>`;
+                    html += `<div class="info-row"><span class="info-label">Tỉnh:</span> <span class="info-value">${province}</span></div>`;
+                } else if (type === 'district') {
+                    html += `<div class="info-row"><span class="info-label">Huyện:</span> <span class="info-value">${district}</span></div>`;
+                    html += `<div class="info-row"><span class="info-label">Tỉnh:</span> <span class="info-value">${province}</span></div>`;
+                } else {
+                    html += `<div class="info-row"><span class="info-label">Tỉnh:</span> <span class="info-value">${province}</span></div>`;
+                }
             }
 
             html += `<div style="margin-top:10px; font-size:0.8rem; color:#888; border-top:1px dashed #ccc; padding-top:5px;">
-                        Dữ liệu trích xuất từ bản đồ năm: <strong>${dataYear}</strong>
+                        Dữ liệu: <strong>${dataYear}</strong> (Timeline: ${currentYear})
                      </div>`;
             
             infoContent.innerHTML = html;
         }
 
-        // Styles
         const styles = {
             province: (feature) => ({
                 fillColor: getColor(feature.properties.Name || feature.properties.NAME_1 || ""),
                 weight: 2, opacity: 1, color: 'white', dashArray: '3', fillOpacity: 0.6
             }),
             district: { fillColor: 'transparent', weight: 1.5, opacity: 1, color: '#2980b9', fillOpacity: 0 },
-            ward: { fillColor: 'transparent', weight: 0.5, opacity: 0.8, color: '#7f8c8d', fillOpacity: 0.2 } // Thêm chút fillOpacity để dễ click
+            ward: { fillColor: 'transparent', weight: 0.5, opacity: 0.8, color: '#7f8c8d', fillOpacity: 0.2 }
         };
-        
-        // --- Xử lý sự kiện Upload File Local ---
-        document.getElementById('fileInput').addEventListener('change', function(e) {
-            const files = e.target.files;
-            if (!files.length) return;
-
-            loading.style.display = 'flex';
-            let loadedCount = 0;
-
-            Array.from(files).forEach(file => {
-                const reader = new FileReader();
-                reader.onload = function(e) {
-                    try {
-                        const json = JSON.parse(e.target.result);
-                        localData[file.name] = json; // Lưu vào cache với tên file làm key
-                        console.log(`Đã nạp thành công: ${file.name}`);
-                    } catch (err) {
-                        console.error(`Lỗi đọc file ${file.name}:`, err);
-                        alert(`File ${file.name} không đúng định dạng JSON/GeoJSON.`);
-                    } finally {
-                        loadedCount++;
-                        if (loadedCount === files.length) {
-                            loading.style.display = 'none';
-                            alert(`Đã nạp ${loadedCount} file. Bản đồ sẽ được cập nhật.`);
-                            updateMap(); // Vẽ lại bản đồ sau khi có dữ liệu mới
-                        }
-                    }
-                };
-                reader.readAsText(file);
-            });
-        });
 
         async function loadLayer(type, selectedYear) {
+            // Đối với 2025, nếu type là district thì bỏ qua luôn (trả về null)
+            if (selectedYear >= 2025 && type === 'district') return;
+
             const bestMatch = getNearestFile(type, selectedYear);
-            
-            // Nếu không tìm thấy file
             if (!bestMatch) return;
             
-            // Nếu đã load đúng layer của năm đó rồi thì không làm gì cả
             if (layers[type].layer && layers[type].year === bestMatch.year) return;
 
-            // Xóa layer cũ nếu có
             if (layers[type].layer) {
                 map.removeLayer(layers[type].layer);
                 layers[type].layer = null;
             }
 
             loading.style.display = 'flex';
-            let data = null;
-
             try {
-                // 1. ƯU TIÊN: Kiểm tra dữ liệu từ file upload (localData)
-                if (localData[bestMatch.file]) {
-                    console.log(`Sử dụng dữ liệu local cho: ${bestMatch.file}`);
-                    data = localData[bestMatch.file];
-                } 
-                // 2. DỰ PHÒNG: Gọi API (dành cho khi chạy server Python)
-                else {
-                    try {
-                        // Thử fetch, nhưng bắt lỗi để không crash app
-                        const response = await fetch(`/api/map/${bestMatch.file}`);
-                        if (response.ok) {
-                            data = await response.json();
-                        } else {
-                            // Không tìm thấy API hoặc lỗi server
-                            console.warn(`Server trả về lỗi ${response.status} cho file ${bestMatch.file}`);
-                        }
-                    } catch (fetchErr) {
-                        // Lỗi mạng hoặc lỗi URL (thường gặp trong môi trường Preview)
-                        console.warn(`Không thể kết nối tới server API cho file ${bestMatch.file}. Đang chạy chế độ Offline?`);
-                    }
-                }
+                const response = await fetch(`/api/map/${bestMatch.file}`);
+                if (!response.ok) throw new Error("API Load Failed");
+                const data = await response.json();
 
                 if (data) {
                     const newLayer = L.geoJSON(data, {
@@ -301,7 +237,7 @@
                         onEachFeature: (feature, layer) => {
                             layer.on('click', (e) => {
                                 L.DomEvent.stopPropagation(e); 
-                                updateInfoBox(feature.properties, type, bestMatch.year);
+                                updateInfoBox(feature.properties, type, bestMatch.year, selectedYear);
                                 
                                 layer.setStyle({ weight: 3, color: '#e74c3c' });
                                 if (!L.Browser.ie && !L.Browser.opera && !L.Browser.edge) {
@@ -321,19 +257,9 @@
 
                     layers[type].layer = newLayer;
                     layers[type].year = bestMatch.year;
-                } else {
-                    // Nếu không có dữ liệu (cả Local và API đều fail)
-                    if (type === 'province') {
-                        infoContent.innerHTML = `<div class="info-empty" style="color:#e74c3c;">
-                            <b>Chưa có dữ liệu cho năm ${selectedYear}!</b><br>
-                            Hệ thống cần file: <em>${bestMatch.file}</em>.<br>
-                            Vui lòng tải file này lên ở mục "Nạp dữ liệu".
-                        </div>`;
-                    }
                 }
-
             } catch (err) {
-                console.error(`Lỗi xử lý ${type}:`, err);
+                console.warn(`Không thể tải ${bestMatch.file}:`, err);
             } finally {
                 loading.style.display = 'none';
             }
@@ -342,10 +268,29 @@
         async function updateMap() {
             const year = parseInt(timeline.value);
             
-            // 1. Luôn load Tỉnh (Province)
+            // --- Logic đặc biệt cho năm 2025 ---
+            if (year >= 2025) {
+                // Tắt checkbox Huyện, disable nó
+                chkDistricts.checked = false;
+                chkDistricts.disabled = true;
+                lblDistrict.classList.add('disabled');
+                
+                // Xóa layer huyện nếu đang hiển thị
+                if (layers.district.layer) {
+                    map.removeLayer(layers.district.layer);
+                    layers.district.layer = null;
+                    layers.district.year = null;
+                }
+            } else {
+                // Bật lại checkbox Huyện
+                chkDistricts.disabled = false;
+                lblDistrict.classList.remove('disabled');
+            }
+            
+            // 1. Luôn load Tỉnh
             await loadLayer('province', year);
 
-            // 2. Load Quận/Huyện nếu được check
+            // 2. Load Quận/Huyện (Chỉ chạy nếu checkbox checked - tức là < 2025)
             if (chkDistricts.checked) {
                 await loadLayer('district', year);
             } else if (layers.district.layer) {
@@ -354,7 +299,7 @@
                 layers.district.year = null;
             }
 
-            // 3. Load Phường/Xã nếu được check
+            // 3. Load Phường/Xã
             if (chkWards.checked) {
                 await loadLayer('ward', year);
             } else if (layers.ward.layer) {
@@ -366,7 +311,7 @@
 
         // Event Listeners
         timeline.addEventListener('input', (e) => yearDisplay.innerText = e.target.value);
-        timeline.addEventListener('change', updateMap); // Chỉ update khi thả chuột
+        timeline.addEventListener('change', updateMap);
         chkDistricts.addEventListener('change', updateMap);
         chkWards.addEventListener('change', updateMap);
 
