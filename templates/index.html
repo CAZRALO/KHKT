@@ -118,11 +118,10 @@
             ],
             district: [
                 { year: 2008, file: 'Districts_2008.geojson' }
-                // Không có entry 2025 vì yêu cầu không hiển thị
             ],
             ward: [
                 { year: 2008, file: 'Wards_2008.geojson' },
-                { year: 2025, file: 'Wards_2025.geojson' } // Đã thêm file mới cho 2025
+                { year: 2025, file: 'Wards_2025.geojson' }
             ]
         };
 
@@ -147,12 +146,20 @@
         const infoContent = document.getElementById('infoContent');
         const lblDistrict = document.getElementById('lblDistrict');
 
-        // Hàm tìm file có năm gần nhất
+        // Hàm tìm file có năm gần nhất (Đã cập nhật theo yêu cầu)
         function getNearestFile(type, selectedYear) {
             const sources = DATA_SOURCES[type];
             if (!sources || sources.length === 0) return null;
-            return sources.reduce((prev, curr) => {
-                return (Math.abs(curr.year - selectedYear) < Math.abs(prev.year - selectedYear) ? curr : prev);
+
+            // Lọc các nguồn có năm nhỏ hơn hoặc bằng năm được chọn
+            const filtedSources = sources.filter(source => source.year <= selectedYear);
+            
+            // Xử lý trường hợp không có file nào thỏa mãn (ví dụ nếu timeline nhỏ hơn năm dữ liệu min)
+            // Mặc định trả về dữ liệu cũ nhất nếu danh sách lọc rỗng để tránh lỗi
+            if (filtedSources.length === 0) return sources[0];
+
+            return filtedSources.reduce((prev, curr) => {
+                return (curr.year > prev.year ? curr : prev); // tìm tệp có năm lớn nhất trong filted
             });
         }
 
